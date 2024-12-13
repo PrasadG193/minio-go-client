@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ func main() {
 	secretKey := flag.String("secret-key", "", "MinIO secret key")
 	bucket := flag.String("bucket", "", "Bucket name")
 	objectPath := flag.String("object", "", "Object path in the bucket")
+	readFull := flag.Bool("read-full", false, "read complete object")
 	startRange := flag.String("start", "0", "Start byte range")
 	endRange := flag.String("end", "-1", "End byte range (exclusive)")
 	secure := flag.Bool("secure", true, "Use secure (HTTPS) connection")
@@ -59,11 +61,25 @@ func main() {
 		log.Fatalf("Invalid end range: %v", err)
 	}
 	opts := minio.GetObjectOptions{}
-	if end >= 0 {
-		opts.SetRange(start, end-1)
-	} else {
-		opts.SetRange(start, 0) // Use 0 to indicate no end limit
+	if !*readFull {
+		if end >= 0 {
+			opts.SetRange(start, end-1)
+		} else {
+			end = 0
+			opts.SetRange(start, 0) // Use 0 to indicate no end limit
+		}
 	}
+
+	// Get object metadata
+	oi, err := minioClient.StatObject(context.Background(), *bucket, *objectPath, minio.GetObjectOptions{})
+	if err != nil {
+		log.Fatalf("Failed to get metadata: %v", err)
+	}
+	oiBytes, err := json.MarshalIndent(oi, "", "  ")
+	if err != nil {
+		log.Fatalf("Failed to marshal metadata info: %v", err)
+	}
+	fmt.Printf("Object Metadata:\n%s\n", string(oiBytes))
 
 	// Retrieve the object
 	obj, err := minioClient.GetObject(context.Background(), *bucket, *objectPath, opts)
@@ -78,5 +94,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to read object data: %v", err)
 	}
-	fmt.Printf("Read %d bytes from object with withn range %d-%d\n", buf.Len(), start, end)
+	if !*readFull {
+		fmt.Printf("Read %d bytes from object with withn range %d-%d\n", buf.Len(), start, end)
+		return
+	}
+	fmt.Printf("Read %d bytes from object\n", buf.Len())
 }
